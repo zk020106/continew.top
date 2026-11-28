@@ -26,7 +26,8 @@ async function collect(dir, section, archive, segments = []) {
 
       const name = entry.name.slice(0, -'.html'.length);
       const suffix = name === 'index' ? segments : [...segments, name];
-      const suffixPath = suffix.length ? `/${suffix.join('/')}` : '';
+      if (!suffix.length) return []; // 分区根单独按默认版本首页判定
+      const suffixPath = `/${suffix.join('/')}`;
       const oldRoute = join(root, 'docs', section.key, ...suffix) + '.html';
       return [[oldRoute, `/docs/${section.key}/${archive.key}${suffixPath}`]];
     }),
@@ -55,8 +56,15 @@ const perSection = await Promise.all(
       }),
     );
     const entries = new Map(results.flat());
-    // 分区根（/docs/<分区>）同样固定指向归档版本
-    entries.set(join(root, 'docs', section.key) + '.html', `/docs/${section.key}/${archive.key}`);
+    // 未汇聚文档时可能只有骨架或子页，不能为缺失的默认版本首页生成跳转。
+    const sectionDir = join(root, 'docs', section.key);
+    try {
+      if ((await stat(join(sectionDir, `${archive.key}.html`))).isFile()) {
+        entries.set(`${sectionDir}.html`, `/docs/${section.key}/${archive.key}`);
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
     return [...entries];
   }),
 );

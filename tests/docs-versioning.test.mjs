@@ -147,13 +147,16 @@ test('legacy redirect generator preserves query and anchor and refuses to overwr
   try {
     const versionDir = join(output, 'docs', 'admin', '5.x');
     await mkdir(versionDir, { recursive: true });
+    await writeFile(`${versionDir}.html`, '<html></html>');
     await writeFile(join(versionDir, 'configuration.html'), '<html></html>');
     const starterVersionDir = join(output, 'docs', 'starter', '3.x');
     await mkdir(starterVersionDir, { recursive: true });
+    await writeFile(`${starterVersionDir}.html`, '<html></html>');
     await writeFile(join(starterVersionDir, 'configuration.html'), '<html></html>');
     // 仅在归档版本存在的页面（最新版已删除）也要生成旧地址跳转页
     await mkdir(join(output, 'docs', 'admin', '4.x', 'manual'), { recursive: true });
     await writeFile(join(output, 'docs', 'admin', '4.x', 'manual', 'generator.html'), '<html></html>');
+    await writeFile(join(output, 'docs', 'admin', '4.x', 'configuration.html'), '<html></html>');
     const script = join(process.cwd(), 'scripts', 'gen-legacy-doc-redirects.mjs');
     // 脚本只接受「工作目录内」的输出目录（路径注入防护），
     // 故在临时目录里执行、把输出目录传成当前位置。
@@ -168,7 +171,34 @@ test('legacy redirect generator preserves query and anchor and refuses to overwr
     assert.match(starterProjectRedirect, /location\.replace\("\/docs\/starter\/3\.x" \+ location\.search \+ location\.hash\)/);
     const removedRedirect = await readFile(join(output, 'docs', 'admin', 'manual', 'generator.html'), 'utf8');
     assert.match(removedRedirect, /location\.replace\("\/docs\/admin\/4\.x\/manual\/generator" \+ location\.search \+ location\.hash\)/);
-    assert.throws(() => execFileSync(process.execPath, [script, '.'], { cwd: output, stdio: 'pipe' }));
+    assert.throws(() => execFileSync(process.execPath, [script, '.'], { cwd: output, stdio: 'pipe' }),
+      /Refusing to overwrite existing route/);
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test('section redirects require the default homepage, not a skeleton, child page or archived index', async () => {
+  const output = await mkdtemp(join(tmpdir(), 'docs-redirects-'));
+  try {
+    const script = join(process.cwd(), 'scripts', 'gen-legacy-doc-redirects.mjs');
+    const generate = () => execFileSync(process.execPath, [script, '.'], { cwd: output });
+    const docs = join(output, 'docs');
+    generate();
+    for (const section of ['admin', 'starter']) {
+      await assert.rejects(access(join(docs, `${section}.html`)), { code: 'ENOENT' });
+    }
+
+    const adminDir = join(docs, 'admin');
+    await mkdir(join(adminDir, '5.x'), { recursive: true });
+    await writeFile(join(adminDir, '5.x', 'configuration.html'), '<html></html>');
+    await mkdir(join(adminDir, '4.x'));
+    await writeFile(join(adminDir, '4.x', 'index.html'), '<html></html>');
+    await writeFile(join(adminDir, '4.x.html'), '<html></html>');
+    generate();
+    await assert.rejects(access(join(docs, 'admin.html')), { code: 'ENOENT' });
+    const child = await readFile(join(adminDir, 'configuration.html'), 'utf8');
+    assert.match(child, /location\.replace\("\/docs\/admin\/5\.x\/configuration"/);
   } finally {
     await rm(output, { recursive: true, force: true });
   }

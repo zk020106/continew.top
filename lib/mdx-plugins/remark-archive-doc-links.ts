@@ -22,36 +22,36 @@ function crossSectionArchivedVersion(section: DocSection, version: DocVersion): 
     ?? section.versions?.find((v) => v.archived);
 }
 
+function rewriteCrossSectionUrl(rawUrl: string, { section, version }: SourceUnit): string | undefined {
+  if (!version?.archived) return undefined;
+  const cross = /^\/docs\/([a-z]+)(?=\/|$)/.exec(rawUrl);
+  if (!cross || cross[1] === section.key) return undefined;
+  const target = docSections.find(({ key }) => key === cross[1]);
+  if (!target?.versions?.length) return undefined;
+  const targetVersion = crossSectionArchivedVersion(target, version);
+  if (!targetVersion?.archived) return undefined;
+  const rest = rawUrl.slice(cross[0].length);
+  const firstSegment = rest.replace(/^\//, '').split(/[/?#]/)[0];
+  if (target.versions.some(({ key }) => key === firstSegment)) return undefined;
+  return `${cross[0]}/${targetVersion.key}${rest}`;
+}
+
+function rewriteSelfUrl(rawUrl: string, { section, version }: SourceUnit): string | undefined {
+  const prefix = `/docs/${section.key}`;
+  if (!version || !rawUrl.startsWith(prefix)) return undefined;
+  const path = rawUrl.split(/[?#]/, 1)[0];
+  if (path !== prefix && !path.startsWith(`${prefix}/`)) return undefined;
+  const firstSegment = path.slice(prefix.length).split('/')[1];
+  if (section.versions?.some(({ key }) => key === firstSegment)) return undefined;
+  return `${prefix}/${version.key}${rawUrl.slice(prefix.length)}`;
+}
+
 /** 上游文档的自链接早于版本化路径，按当前编译页面所属版本解析。 */
 export function rewriteDocUrl(rawUrl: string, unit: SourceUnit): string {
-  const { section, version } = unit;
-  const prefix = `/docs/${section.key}`;
-  // 跨分区裸链接：仅归档页参与，按 companion 配套落到对方的归档版本
-  if (version?.archived) {
-    const cross = /^\/docs\/([a-z]+)(?=\/|$)/.exec(rawUrl);
-    if (cross && cross[1] !== section.key) {
-      const target = docSections.find(({ key }) => key === cross[1]);
-      const targetVersion = target ? crossSectionArchivedVersion(target, version) : undefined;
-      if (target?.versions?.length && targetVersion?.archived) {
-        const rest = rawUrl.slice(`/docs/${cross[1]}`.length);
-        const firstSegment = rest.replace(/^\//, '').split(/[/?#]/)[0];
-        if (!target.versions.some(({ key }) => key === firstSegment)) {
-          return `/docs/${cross[1]}/${targetVersion.key}${rest}`;
-        }
-      }
-    }
-  }
-  if (version && rawUrl.startsWith(prefix)) {
-    const path = rawUrl.split(/[?#]/, 1)[0];
-    if (path === prefix || path.startsWith(`${prefix}/`)) {
-      const suffix = path.slice(prefix.length);
-      const firstSegment = suffix.split('/')[1];
-      if (!section.versions?.some(({ key }) => key === firstSegment)) {
-        return `${prefix}/${version.key}${rawUrl.slice(prefix.length)}`;
-      }
-    }
-  }
+  const local = rewriteCrossSectionUrl(rawUrl, unit) ?? rewriteSelfUrl(rawUrl, unit);
+  if (local !== undefined) return local;
 
+  const { version } = unit;
   if (!version?.archived || !version.versionTag) return rawUrl;
   let url: URL;
   try {
